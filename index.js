@@ -70,6 +70,83 @@ const verifyOwnerEmail = (req, res, next) => {
   next();
 };
 
+// ---------------- Studios ----------------
+app.post("/studios", verifyToken, async (req, res) => {
+  const studioData = req.body;
+
+  const newStudio = {
+    ...studioData,
+    hourlyRate: Number(studioData.hourlyRate),
+    securityDeposit: Number(studioData.securityDeposit),
+    maxCapacity: Number(studioData.maxCapacity),
+    // owner always comes from the verified token, not from the form
+    ownerEmail: req.user.email,
+    ownerName: req.user.name,
+    ownerImage: req.user.image || "",
+    rating: 0,
+    reviews: [],
+    createdAt: new Date(),
+  };
+
+  const result = await studiosCollection.insertOne(newStudio);
+  res.send(result);
+});
+
+app.get("/studios/:id", async (req, res) => {
+  const _id = toObjectId(req.params.id);
+  if (!_id) return res.status(404).send({ message: "Studio not found" });
+
+  const result = await studiosCollection.findOne({ _id });
+  if (!result) return res.status(404).send({ message: "Studio not found" });
+  res.send(result);
+});
+
+app.get("/my-listings/:email", verifyToken, verifyOwnerEmail, async (req, res) => {
+  const result = await studiosCollection
+    .find({ ownerEmail: req.params.email })
+    .sort({ createdAt: -1 })
+    .toArray();
+  res.send(result);
+});
+
+app.patch("/studios/:id", verifyToken, async (req, res) => {
+  const _id = toObjectId(req.params.id);
+  if (!_id) return res.status(404).send({ message: "Studio not found" });
+
+  const studio = await studiosCollection.findOne({ _id });
+  if (!studio) return res.status(404).send({ message: "Studio not found" });
+  if (studio.ownerEmail !== req.user.email) {
+    return res.status(403).send({ message: "You can only edit your own studio" });
+  }
+
+  // never let the client change these fields
+  const { _id: _ignore, ownerEmail, ownerName, rating, reviews, createdAt, ...rest } = req.body;
+  const updatedData = {
+    ...rest,
+    hourlyRate: Number(rest.hourlyRate),
+    securityDeposit: Number(rest.securityDeposit),
+    maxCapacity: Number(rest.maxCapacity),
+    updatedAt: new Date(),
+  };
+
+  const result = await studiosCollection.updateOne({ _id }, { $set: updatedData });
+  res.send(result);
+});
+
+app.delete("/studios/:id", verifyToken, async (req, res) => {
+  const _id = toObjectId(req.params.id);
+  if (!_id) return res.status(404).send({ message: "Studio not found" });
+
+  const studio = await studiosCollection.findOne({ _id });
+  if (!studio) return res.status(404).send({ message: "Studio not found" });
+  if (studio.ownerEmail !== req.user.email) {
+    return res.status(403).send({ message: "You can only delete your own studio" });
+  }
+
+  const result = await studiosCollection.deleteOne({ _id });
+  res.send(result);
+});
+
 app.get("/", (req, res) => {
   res.send({ message: "StudioSpace server is running" });
 });
