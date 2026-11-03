@@ -147,6 +147,43 @@ app.delete("/studios/:id", verifyToken, async (req, res) => {
   res.send(result);
 });
 
+// ---------------- Explore + Featured ----------------
+// GET /studios?category=Photo Studio&search=dhaka&sort=price-asc
+app.get("/studios", async (req, res) => {
+  const { category, search, sort } = req.query;
+  const query = {};
+
+  if (category && category !== "All") query.category = category;
+  if (search) {
+    query.$or = [
+      { title: { $regex: search, $options: "i" } },
+      { location: { $regex: search, $options: "i" } },
+    ];
+  }
+
+  const sortOptions = {
+    "price-asc": { hourlyRate: 1 },
+    "price-desc": { hourlyRate: -1 },
+    rating: { rating: -1 },
+    newest: { createdAt: -1 },
+  };
+
+  const result = await studiosCollection
+    .find(query)
+    .sort(sortOptions[sort] || { createdAt: -1 })
+    .toArray();
+  res.send(result);
+});
+
+app.get("/featured-studios", async (req, res) => {
+  const result = await studiosCollection
+    .find()
+    .sort({ rating: -1, createdAt: -1 })
+    .limit(6)
+    .toArray();
+  res.send(result);
+});
+
 app.get("/", (req, res) => {
   res.send({ message: "StudioSpace server is running" });
 });
