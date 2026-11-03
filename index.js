@@ -184,6 +184,100 @@ app.get("/featured-studios", async (req, res) => {
   res.send(result);
 });
 
+// ---------------- Bookings ----------------
+// Booking time is stored as startAt / endAt (Date) so we can check overlap.
+app.post("/bookings", verifyToken, async (req, res) => {
+  const { studioId, date, startTime, hours, guests, note } = req.body;
+
+  const _id = toObjectId(studioId);
+  const studio = _id && (await studiosCollection.findOne({ _id }));
+  if (!studio) return res.status(404).send({ message: "Studio not found" });
+
+  if (studio.ownerEmail === req.user.email) {
+    return res.status(400).send({ message: "You cannot book your own studio" });
+  }
+
+  const startAt = new Date(`${date}T${startTime}:00`);
+  const endAt = new Date(startAt.getTime() + Number(hours) * 60 * 60 * 1000);
+  if (isNaN(startAt.getTime()) || Number(hours) < 1) {
+    return res.status(400).send({ message: "Please choose a valid date and time" });
+  }
+  if (startAt < new Date()) {
+    return res.status(400).send({ message: "You cannot book a time in the past" });
+  }
+
+  // Double-booking prevention: two slots overlap when
+  // existing.start < new.end AND existing.end > new.start
+  const clash = await bookingsCollection.findOne({
+    studioId,
+    status: { $in: ["Confirmed", "Pending"] },
+    startAt: { $lt: endAt },
+    endAt: { $gt: startAt },
+  });
+
+  if (clash) {
+    return res.status(409).send({
+      message:
+        "This studio is already booked for part of that time. Please pick another slot.",
+    });
+  }
+
+  const booking = {
+    studioId,
+    studioTitle: studio.title,
+    studioImage: studio.image,
+    studioLocation: studio.location,
+    category: studio.category,
+    hostEmail: studio.ownerEmail,
+    hostName: studio.ownerName,
+    hourlyRate: studio.hourlyRate,
+    securityDeposit: studio.securityDeposit,
+    date,
+    startTime,
+    hours: Number(hours),
+    guests: Number(guests) || 1,
+    note: note || "",
+    startAt,
+    endAt,
+    totalPrice: studio.hourlyRate * Number(hours),
+    userEmail: req.user.email,
+    userName: req.user.name,
+    userImage: req.user.image || "",
+    status: "Pending",
+    createdAt: new Date(),
+  };
+
+  const result = await bookingsCollection.insertOne(booking);
+  res.send(result);
+});
+
+app.get("/my-bookings/:email", verifyToken, verifyOwnerEmail, async (req, res) => {
+  const result = await bookingsCollection
+    .find({ userEmail: req.params.email })
+    .sort({ startAt: -1 })
+    .toArray();
+  res.send(result);
+});
+
+// Guest cancels their own pending booking
+app.patch("/bookings/:id/cancel", verifyToken, async (req, res) => {
+  const _id = toObjectId(req.params.id);
+  const booking = _id && (await bookingsCollection.findOne({ _id }));
+  if (!booking) return res.status(404).send({ message: "Booking not found" });
+  if (booking.userEmail !== req.user.email) {
+    return res.status(403).send({ message: "Forbidden access" });
+  }
+  if (booking.status !== "Pending") {
+    return res.status(400).send({ message: "Only pending bookings can be cancelled" });
+  }
+
+  const result = await bookingsCollection.updateOne(
+    { _id },
+    { $set: { status: "Cancelled", updatedAt: new Date() } },
+  );
+  res.send(result);
+});
+
 app.get("/", (req, res) => {
   res.send({ message: "StudioSpace server is running" });
 });
