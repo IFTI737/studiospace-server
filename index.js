@@ -325,6 +325,34 @@ app.patch("/bookings/:id/status", verifyToken, async (req, res) => {
   res.send(result);
 });
 
+// ---------------- Reviews ----------------
+// $push adds the review, then $avg (aggregation pipeline update) recalculates rating
+app.post("/studios/:id/reviews", verifyToken, async (req, res) => {
+  const _id = toObjectId(req.params.id);
+  const studio = _id && (await studiosCollection.findOne({ _id }));
+  if (!studio) return res.status(404).send({ message: "Studio not found" });
+
+  const rating = Math.min(5, Math.max(1, Number(req.body.rating)));
+  const comment = String(req.body.comment || "").trim();
+  if (!comment) return res.status(400).send({ message: "Please write a comment" });
+
+  const review = {
+    _id: new ObjectId(),
+    userName: req.user.name,
+    userEmail: req.user.email,
+    userImage: req.user.image || "",
+    rating,
+    comment,
+    createdAt: new Date(),
+  };
+
+  await studiosCollection.updateOne({ _id }, { $push: { reviews: review } });
+  const result = await studiosCollection.updateOne({ _id }, [
+    { $set: { rating: { $round: [{ $avg: "$reviews.rating" }, 1] } } },
+  ]);
+  res.send(result);
+});
+
 app.get("/", (req, res) => {
   res.send({ message: "StudioSpace server is running" });
 });
