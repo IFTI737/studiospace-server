@@ -278,6 +278,53 @@ app.patch("/bookings/:id/cancel", verifyToken, async (req, res) => {
   res.send(result);
 });
 
+// ---------------- Host side: requests for my studios ----------------
+app.get("/host-bookings/:email", verifyToken, verifyOwnerEmail, async (req, res) => {
+  const result = await bookingsCollection
+    .find({ hostEmail: req.params.email })
+    .sort({ startAt: -1 })
+    .toArray();
+  res.send(result);
+});
+
+// Host changes status: Pending -> Confirmed / Cancelled, Confirmed -> Completed
+app.patch("/bookings/:id/status", verifyToken, async (req, res) => {
+  const { status } = req.body;
+  const allowed = ["Confirmed", "Completed", "Cancelled"];
+  if (!allowed.includes(status)) {
+    return res.status(400).send({ message: "Invalid status" });
+  }
+
+  const _id = toObjectId(req.params.id);
+  const booking = _id && (await bookingsCollection.findOne({ _id }));
+  if (!booking) return res.status(404).send({ message: "Booking not found" });
+  if (booking.hostEmail !== req.user.email) {
+    return res.status(403).send({ message: "Only the host can update this booking" });
+  }
+
+  // Before confirming, make sure no other confirmed booking overlaps
+  if (status === "Confirmed") {
+    const clash = await bookingsCollection.findOne({
+      _id: { $ne: _id },
+      studioId: booking.studioId,
+      status: "Confirmed",
+      startAt: { $lt: booking.endAt },
+      endAt: { $gt: booking.startAt },
+    });
+    if (clash) {
+      return res.status(409).send({
+        message: "Another confirmed booking already covers this time.",
+      });
+    }
+  }
+
+  const result = await bookingsCollection.updateOne(
+    { _id },
+    { $set: { status, updatedAt: new Date() } },
+  );
+  res.send(result);
+});
+
 app.get("/", (req, res) => {
   res.send({ message: "StudioSpace server is running" });
 });
