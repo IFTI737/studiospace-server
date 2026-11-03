@@ -353,6 +353,34 @@ app.post("/studios/:id/reviews", verifyToken, async (req, res) => {
   res.send(result);
 });
 
+// ---------------- Wishlist (saved studios) ----------------
+app.get("/wishlist/:email", verifyToken, verifyOwnerEmail, async (req, res) => {
+  const saved = await wishlistCollection.find({ userEmail: req.params.email }).toArray();
+  const ids = saved.map((item) => toObjectId(item.studioId)).filter(Boolean);
+  const studios = await studiosCollection.find({ _id: { $in: ids } }).toArray();
+  res.send(studios);
+});
+
+// Toggle: saves the studio, or removes it if it was already saved
+app.post("/wishlist", verifyToken, async (req, res) => {
+  const { studioId } = req.body;
+  const filter = { studioId, userEmail: req.user.email };
+
+  const existing = await wishlistCollection.findOne(filter);
+  if (existing) {
+    await wishlistCollection.deleteOne(filter);
+    return res.send({ saved: false });
+  }
+
+  await wishlistCollection.insertOne({ ...filter, createdAt: new Date() });
+  res.send({ saved: true });
+});
+
+app.get("/wishlist-ids/:email", verifyToken, verifyOwnerEmail, async (req, res) => {
+  const saved = await wishlistCollection.find({ userEmail: req.params.email }).toArray();
+  res.send(saved.map((item) => item.studioId));
+});
+
 app.get("/", (req, res) => {
   res.send({ message: "StudioSpace server is running" });
 });
